@@ -1,0 +1,1380 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>APR1400 계통 통합 모사 시뮬레이터 - 한수원 인재개발원 교육용</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js for trends -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap');
+        
+        body {
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+            background-color: #0b0f19;
+            color: #e2e8f0;
+        }
+        
+        .font-mono-num {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Flow animations */
+        @keyframes dashFlow {
+            to {
+                stroke-dashoffset: -40;
+            }
+        }
+        
+        .pipe-flow {
+            stroke-dasharray: 8, 6;
+            animation: dashFlow 1.2s linear infinite;
+        }
+        
+        .pipe-flow-fast {
+            stroke-dasharray: 8, 6;
+            animation: dashFlow 0.6s linear infinite;
+        }
+
+        .pipe-flow-reverse {
+            stroke-dasharray: 8, 6;
+            animation: dashFlow 1.2s linear infinite reverse;
+        }
+
+        /* Annunciator flashing */
+        @keyframes blinkAlarm {
+            0%, 100% { opacity: 1; background-color: rgba(239, 68, 68, 0.9); }
+            50% { opacity: 0.4; background-color: rgba(185, 28, 28, 0.4); }
+        }
+
+        .alarm-active {
+            animation: blinkAlarm 1s infinite;
+            color: white !important;
+            border-color: #ef4444 !important;
+        }
+
+        /* Glowing effects */
+        .glow-blue { box-shadow: 0 0 15px rgba(56, 189, 248, 0.3); }
+        .glow-red { box-shadow: 0 0 15px rgba(248, 113, 113, 0.3); }
+        .glow-green { box-shadow: 0 0 15px rgba(74, 222, 128, 0.3); }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #111827;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #374151;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4b5563;
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden bg-slate-950 text-slate-100 selection:bg-cyan-500 selection:text-white">
+
+    <!-- TOP HEADER / BRANDING -->
+    <header class="bg-slate-900/90 border-b border-slate-800 px-4 py-2.5 flex items-center justify-between backdrop-blur-md z-30 shrink-0">
+        <div class="flex items-center space-x-3">
+            <div class="bg-gradient-to-br from-blue-600 to-cyan-500 text-white p-2 rounded-lg shadow-md flex items-center justify-center">
+                <i class="fa-solid font-bold text-lg">KHNP</i>
+            </div>
+            <div>
+                <div class="flex items-center space-x-2">
+                    <h1 class="text-lg font-bold tracking-tight text-white">APR1400 계통 통합 동작 시뮬레이터</h1>
+                    <span class="bg-cyan-900/60 border border-cyan-500/40 text-cyan-300 text-xs px-2 py-0.5 rounded-full font-medium">한수원 인재개발원 교육용</span>
+                </div>
+                <p class="text-xs text-slate-400">1차 계통(RCS) · 2차 계통(Steam Loop) · 복수 및 재순환 계통 동적 모사</p>
+            </div>
+        </div>
+
+        <!-- MCR STATUS & QUICK SCENARIOS -->
+        <div class="flex items-center space-x-3">
+            <div class="hidden xl:flex items-center space-x-2 bg-slate-950/80 px-3 py-1.5 rounded-lg border border-slate-800 text-xs">
+                <span class="text-slate-400">운전 상태:</span>
+                <span id="mcrStateBadge" class="font-bold text-emerald-400 flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 정상 출력 운전 (100% Full Power)
+                </span>
+            </div>
+
+            <!-- SCENARIO SELECTOR -->
+            <div class="flex items-center space-x-1 bg-slate-800/80 p-1 rounded-lg border border-slate-700">
+                <label class="text-xs text-slate-300 pl-2 pr-1 font-medium hidden sm:inline"><i class="fa-solid fa-clapperboard text-cyan-400 mr-1"></i>시나리오:</label>
+                <select id="scenarioSelect" onchange="loadScenario(this.value)" class="bg-slate-900 text-slate-200 text-xs rounded border border-slate-700 px-2.5 py-1 focus:outline-none focus:border-cyan-500 cursor-pointer">
+                    <option value="normal">1. 정상 정격 출력 (100% Steady State)</option>
+                    <option value="load_follow">2. 부하 추종 운전 (100% ➔ 50% 감발)</option>
+                    <option value="sbloca">3. 비상 사고: 소형 냉각재 상실 사고 (SBLOCA + DVI 작동)</option>
+                    <option value="turbine_trip">4. 과도 현상: 터빈 트립 (Turbine Trip & SBCS)</option>
+                    <option value="rcp_trip">5. 장비 고장: 원자로냉각재펌프(RCP) 1대 정지</option>
+                </select>
+            </div>
+
+            <!-- SIMULATION CONTROL BUTTONS -->
+            <div class="flex items-center space-x-1.5">
+                <button id="btnPause" onclick="togglePause()" class="bg-amber-600/80 hover:bg-amber-500 text-white text-xs px-3 py-1.5 rounded-md font-semibold transition flex items-center gap-1">
+                    <i class="fa-solid fa-pause"></i> <span>일시정지</span>
+                </button>
+                <button onclick="resetSimulation()" class="bg-slate-700 hover:bg-slate-600 text-white text-xs px-3 py-1.5 rounded-md font-semibold transition flex items-center gap-1">
+                    <i class="fa-solid fa-rotate-right"></i> <span>초기화</span>
+                </button>
+                <button onclick="triggerScram()" class="bg-rose-600 hover:bg-rose-500 text-white text-xs px-3 py-1.5 rounded-md font-bold transition shadow-lg shadow-rose-900/40 flex items-center gap-1 border border-rose-400">
+                    <i class="fa-solid fa-triangle-exclamation animate-bounce"></i> <span>비상 원자로 정지 (SCRAM)</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- MAIN WORKSPACE CONTAINER -->
+    <div class="flex-1 flex overflow-hidden relative">
+
+        <!-- LEFT PANEL: ANNUNCIATOR & CONTROL CONSOLE -->
+        <aside class="w-80 bg-slate-900/95 border-r border-slate-800 flex flex-col shrink-0 overflow-y-auto z-20">
+            
+            <!-- ANNUNCIATOR / ALARM MATRIX PANEL -->
+            <div class="p-3 border-b border-slate-800">
+                <div class="flex items-center justify-between mb-2">
+                    <h2 class="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                        <i class="fa-solid fa-bell text-amber-400"></i> MCR 경보 창 (Annunciator)
+                    </h2>
+                    <span id="alarmCount" class="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono-num">0 Active</span>
+                </div>
+                <div class="grid grid-cols-2 gap-1.5 text-[11px] font-semibold">
+                    <div id="alarmHighTemp" class="p-2 rounded bg-slate-800/60 border border-slate-700 text-slate-500 text-center transition">
+                        노심 고온 경보<br><span class="text-[9px] font-normal opacity-80">(T_hot > 328℃)</span>
+                    </div>
+                    <div id="alarmHighPress" class="p-2 rounded bg-slate-800/60 border border-slate-700 text-slate-500 text-center transition">
+                        RCS 고압 경보<br><span class="text-[9px] font-normal opacity-80">(P > 160 bar)</span>
+                    </div>
+                    <div id="alarmLowPress" class="p-2 rounded bg-slate-800/60 border border-slate-700 text-slate-500 text-center transition">
+                        RCS 저압 경보<br><span class="text-[9px] font-normal opacity-80">(P < 145 bar)</span>
+                    </div>
+                    <div id="alarmSgLowLevel" class="p-2 rounded bg-slate-800/60 border border-slate-700 text-slate-500 text-center transition">
+                        SG 저수위 경보<br><span class="text-[9px] font-normal opacity-80">(Level < 40%)</span>
+                    </div>
+                    <div id="alarmTurbineTrip" class="p-2 rounded bg-slate-800/60 border border-slate-700 text-slate-500 text-center transition">
+                        터빈 트립 발생<br><span class="text-[9px] font-normal opacity-80">(Turbine Trip)</span>
+                    </div>
+                    <div id="alarmDviActive" class="p-2 rounded bg-slate-800/60 border border-slate-700 text-slate-500 text-center transition">
+                        DVI 안전주입 작동<br><span class="text-[9px] font-normal opacity-80">(ECCS Active)</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CONTROLS TABS / SLIDERS -->
+            <div class="p-3 space-y-4 flex-1">
+                
+                <!-- 1차 계통 제어 (PRIMARY RCS CONTROLS) -->
+                <div class="bg-slate-950/60 p-3 rounded-lg border border-slate-800 space-y-3">
+                    <h3 class="text-xs font-bold text-cyan-400 uppercase tracking-wider flex items-center justify-between">
+                        <span><i class="fa-solid fa-atom mr-1"></i> 1차 계통 (RCS) 제어</span>
+                        <span class="text-[10px] text-slate-500">APR1400 Primary</span>
+                    </h3>
+
+                    <!-- 제어봉 위치 (Control Rod Position) -->
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-slate-300">제어봉 인출 위치 (Rod Out)</span>
+                            <span id="valControlRod" class="text-cyan-400 font-mono-num font-bold">100 %</span>
+                        </div>
+                        <input type="range" id="sliderControlRod" min="0" max="100" value="100" oninput="updateControlRod(this.value)" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500">
+                    </div>
+
+                    <!-- 원자로 냉각재 펌프 (RCP) 대수 -->
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-slate-300">운전 중인 RCP 대수</span>
+                            <span id="valRcpCount" class="text-cyan-400 font-mono-num font-bold">4 / 4 대</span>
+                        </div>
+                        <div class="grid grid-cols-4 gap-1">
+                            <button onclick="setRcpCount(1)" class="rcp-btn bg-slate-800 hover:bg-slate-700 text-xs py-1 rounded text-slate-300 font-medium">1대</button>
+                            <button onclick="setRcpCount(2)" class="rcp-btn bg-slate-800 hover:bg-slate-700 text-xs py-1 rounded text-slate-300 font-medium">2대</button>
+                            <button onclick="setRcpCount(3)" class="rcp-btn bg-slate-800 hover:bg-slate-700 text-xs py-1 rounded text-slate-300 font-medium">3대</button>
+                            <button onclick="setRcpCount(4)" class="rcp-btn bg-cyan-600 text-xs py-1 rounded text-white font-bold">4대</button>
+                        </div>
+                    </div>
+
+                    <!-- 가압기 히터/살수 조절 모드 -->
+                    <div class="pt-1">
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-slate-300">가압기 압력 제어 (PZR)</span>
+                            <span id="valPzrMode" class="text-emerald-400 text-[11px] font-bold">자동 제어 중</span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-1 text-xs">
+                            <button id="btnPzrHeater" onclick="togglePzrHeater()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 py-1.5 rounded border border-slate-700 flex items-center justify-center gap-1">
+                                <i class="fa-solid fa-fire text-amber-500"></i> 히터 강제 ON
+                            </button>
+                            <button id="btnPzrSpray" onclick="togglePzrSpray()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 py-1.5 rounded border border-slate-700 flex items-center justify-center gap-1">
+                                <i class="fa-solid fa-shower text-blue-400"></i> 살수(Spray) ON
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2차 계통 & 발전 제어 (SECONDARY & TURBINE CONTROLS) -->
+                <div class="bg-slate-950/60 p-3 rounded-lg border border-slate-800 space-y-3">
+                    <h3 class="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center justify-between">
+                        <span><i class="fa-solid fa-bolt mr-1"></i> 2차 계통 및 터빈/발전</span>
+                        <span class="text-[10px] text-slate-500">Secondary Loop</span>
+                    </h3>
+
+                    <!-- 터빈 요구 부하 (Turbine Load Demand) -->
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-slate-300">터빈 요구 부하 (Demand)</span>
+                            <span id="valTurbineDemand" class="text-amber-400 font-mono-num font-bold">100 % (1400 MW)</span>
+                        </div>
+                        <input type="range" id="sliderTurbineDemand" min="0" max="100" value="100" oninput="updateTurbineDemand(this.value)" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500">
+                    </div>
+
+                    <!-- 주증기 격리밸브 (MSIV) -->
+                    <div class="flex items-center justify-between text-xs pt-1">
+                        <span class="text-slate-300">주증기 격리밸브 (MSIV)</span>
+                        <button id="btnMsiv" onclick="toggleMsiv()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3 py-1 rounded text-xs transition">
+                            OPEN (열림)
+                        </button>
+                    </div>
+
+                    <!-- 터빈 바이패스 밸브 (SBCS) -->
+                    <div class="flex items-center justify-between text-xs">
+                        <span class="text-slate-300">증기 바이패스계통 (SBCS)</span>
+                        <span id="valSbcsStatus" class="text-slate-400 font-mono-num">대기 (0%)</span>
+                    </div>
+                </div>
+
+                <!-- 3차 계통 / 복수계통 제어 (CONDENSER & FEEDWATER CONTROLS) -->
+                <div class="bg-slate-950/60 p-3 rounded-lg border border-slate-800 space-y-3">
+                    <h3 class="text-xs font-bold text-blue-400 uppercase tracking-wider flex items-center justify-between">
+                        <span><i class="fa-solid fa-water mr-1"></i> 복수 및 급수 계통</span>
+                        <span class="text-[10px] text-slate-500">Feedwater & Condenser</span>
+                    </h3>
+
+                    <!-- 해수 냉각수 온도의 영향 -->
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-slate-300">해수 (순환수) 유입 온도</span>
+                            <span id="valSeaTemp" class="text-blue-400 font-mono-num font-bold">18.0 ℃</span>
+                        </div>
+                        <input type="range" id="sliderSeaTemp" min="5" max="32" value="18" oninput="updateSeaTemp(this.value)" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500">
+                    </div>
+
+                    <!-- 주급수 펌프 제어 -->
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-slate-300">주급수 펌프 유량 설정</span>
+                            <span id="valFeedwaterRate" class="text-blue-400 font-mono-num font-bold">100 %</span>
+                        </div>
+                        <input type="range" id="sliderFeedwater" min="0" max="120" value="100" oninput="updateFeedwater(this.value)" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500">
+                    </div>
+                </div>
+
+                <!-- 비상 수동 작동 제어 -->
+                <div class="bg-rose-950/30 p-3 rounded-lg border border-rose-900/50 space-y-2">
+                    <h3 class="text-xs font-bold text-rose-400 uppercase tracking-wider">
+                        <i class="fa-solid fa-hand-holding-medical mr-1"></i> 비상 안전 계통 수동 개입
+                    </h3>
+                    <div class="grid grid-cols-2 gap-1.5 text-xs">
+                        <button id="btnDviManual" onclick="toggleDviManual()" class="bg-slate-800 hover:bg-slate-700 text-rose-300 py-1.5 rounded border border-rose-800/60 font-semibold text-center transition">
+                            DVI 안전주입 수동동작
+                        </button>
+                        <button id="btnPosrvManual" onclick="togglePosrvManual()" class="bg-slate-800 hover:bg-slate-700 text-amber-300 py-1.5 rounded border border-amber-800/60 font-semibold text-center transition">
+                            POSRV 방출밸브 개방
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+            
+            <!-- EDUCATIONAL FOOTER NOTES -->
+            <div class="p-3 bg-slate-950 border-t border-slate-800 text-[11px] text-slate-400 leading-relaxed">
+                <p class="font-semibold text-slate-300 mb-0.5"><i class="fa-solid fa-graduation-cap text-cyan-400 mr-1"></i>한수원 인재개발원 학습 포인트:</p>
+                <p>APR1400은 1차 계통의 방사성 물질이 2차 계통으로 누출되지 않도록 증기발생기 튜브로 격리되어 있으며, DVI(직접용기주입) 방식 적용으로 비상 냉각수 유실을 최소화합니다.</p>
+            </div>
+        </aside>
+
+        <!-- CENTER / RIGHT WORKSPACE: SYNOPTIC P&ID DIAGRAM & LIVE CHARTS -->
+        <main class="flex-1 flex flex-col bg-slate-950 relative overflow-hidden">
+            
+            <!-- TOP STATS BAR (REAL-TIME METRICS) -->
+            <div class="bg-slate-900/80 border-b border-slate-800 px-4 py-2 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 shrink-0 z-10 text-xs">
+                <!-- Core Thermal Power -->
+                <div class="bg-slate-950/80 p-2 rounded border border-slate-800">
+                    <div class="text-slate-400 text-[10px] flex items-center justify-between">
+                        <span>원자로 열출력</span>
+                        <i class="fa-solid fa-fire-flame-curved text-rose-500"></i>
+                    </div>
+                    <div class="mt-0.5 flex items-baseline justify-between">
+                        <span id="dispCorePower" class="text-base font-bold text-rose-400 font-mono-num">3,983</span>
+                        <span class="text-[10px] text-slate-400">MWth (<span id="dispCorePowerPct">100</span>%)</span>
+                    </div>
+                </div>
+
+                <!-- Electrical Output -->
+                <div class="bg-slate-950/80 p-2 rounded border border-slate-800">
+                    <div class="text-slate-400 text-[10px] flex items-center justify-between">
+                        <span>발전기 전기출력</span>
+                        <i class="fa-solid fa-plug text-amber-400"></i>
+                    </div>
+                    <div class="mt-0.5 flex items-baseline justify-between">
+                        <span id="dispElecPower" class="text-base font-bold text-amber-300 font-mono-num">1,400</span>
+                        <span class="text-[10px] text-slate-400">MWe</span>
+                    </div>
+                </div>
+
+                <!-- RCS Pressure & Temp -->
+                <div class="bg-slate-950/80 p-2 rounded border border-slate-800">
+                    <div class="text-slate-400 text-[10px] flex items-center justify-between">
+                        <span>1차계통 평균온도 / 압력</span>
+                        <i class="fa-solid fa-gauge text-cyan-400"></i>
+                    </div>
+                    <div class="mt-0.5 flex items-baseline justify-between">
+                        <span id="dispRcsTemp" class="text-base font-bold text-cyan-300 font-mono-num">306.2 ℃</span>
+                        <span id="dispRcsPress" class="text-xs font-bold text-slate-300 font-mono-num">155 bar</span>
+                    </div>
+                </div>
+
+                <!-- Steam Generator Pressure & Level -->
+                <div class="bg-slate-950/80 p-2 rounded border border-slate-800">
+                    <div class="text-slate-400 text-[10px] flex items-center justify-between">
+                        <span>증기발생기 압력 / 수위</span>
+                        <i class="fa-solid fa-water text-blue-400"></i>
+                    </div>
+                    <div class="mt-0.5 flex items-baseline justify-between">
+                        <span id="dispSgPress" class="text-base font-bold text-blue-300 font-mono-num">69.0 bar</span>
+                        <span id="dispSgLevel" class="text-xs font-bold text-emerald-400 font-mono-num">50.0 %</span>
+                    </div>
+                </div>
+
+                <!-- Condenser Vacuum & Temp -->
+                <div class="bg-slate-950/80 p-2 rounded border border-slate-800">
+                    <div class="text-slate-400 text-[10px] flex items-center justify-between">
+                        <span>복수기 진공도 / 배기온도</span>
+                        <i class="fa-solid fa-wind text-indigo-400"></i>
+                    </div>
+                    <div class="mt-0.5 flex items-baseline justify-between">
+                        <span id="dispCondVacuum" class="text-base font-bold text-indigo-300 font-mono-num">722 mmHg</span>
+                        <span id="dispCondTemp" class="text-xs font-bold text-slate-300 font-mono-num">38.5 ℃</span>
+                    </div>
+                </div>
+
+                <!-- Thermal Efficiency -->
+                <div class="bg-slate-950/80 p-2 rounded border border-slate-800">
+                    <div class="text-slate-400 text-[10px] flex items-center justify-between">
+                        <span>열효율 (Efficiency)</span>
+                        <i class="fa-solid fa-chart-line text-emerald-400"></i>
+                    </div>
+                    <div class="mt-0.5 flex items-baseline justify-between">
+                        <span id="dispEfficiency" class="text-base font-bold text-emerald-400 font-mono-num">35.15 %</span>
+                        <span class="text-[10px] text-slate-400">PWR Standard</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW SELECTOR TABS (P&ID vs TREND CHARTS) -->
+            <div class="bg-slate-900 border-b border-slate-800 px-4 py-1 flex items-center justify-between z-10 shrink-0">
+                <div class="flex space-x-1">
+                    <button id="tabBtnDiagram" onclick="switchMainTab('diagram')" class="px-3 py-1 rounded text-xs font-bold bg-cyan-600 text-white flex items-center gap-1.5 transition">
+                        <i class="fa-solid fa-diagram-project"></i> 실시간 계통 흐름도 (P&ID Synoptic)
+                    </button>
+                    <button id="tabBtnCharts" onclick="switchMainTab('charts')" class="px-3 py-1 rounded text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 flex items-center gap-1.5 transition">
+                        <i class="fa-solid fa-chart-line text-emerald-400"></i> 실시간 매개변수 트렌드 (Trend Curves)
+                    </button>
+                    <button id="tabBtnGuide" onclick="switchMainTab('guide')" class="px-3 py-1 rounded text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 flex items-center gap-1.5 transition">
+                        <i class="fa-solid fa-book-bookmark text-amber-400"></i> 계통 구동원리 교육자료
+                    </button>
+                </div>
+
+                <div class="text-[11px] text-slate-400 hidden lg:flex items-center gap-3">
+                    <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block"></span> 1차 고온 배관(Hot Leg)</span>
+                    <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-cyan-500 inline-block"></span> 1차 저온 배관(Cold Leg)</span>
+                    <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block"></span> 2차 주증기(Main Steam)</span>
+                    <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block"></span> 3차 급수/응축수(Feedwater)</span>
+                </div>
+            </div>
+
+            <!-- TAB CONTENT 1: INTERACTIVE SVG P&ID SCHEMATIC -->
+            <div id="tabContentDiagram" class="flex-1 relative overflow-hidden bg-slate-950 flex items-center justify-center p-2">
+                <svg id="svgSchematic" viewBox="0 0 1200 680" class="w-full h-full max-h-full max-w-full select-none">
+                    <defs>
+                        <!-- Gradients for piping & components -->
+                        <linearGradient id="gradHotLeg" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" stop-color="#ef4444" />
+                            <stop offset="100%" stop-color="#f97316" />
+                        </linearGradient>
+                        <linearGradient id="gradColdLeg" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" stop-color="#0284c7" />
+                            <stop offset="100%" stop-color="#06b6d4" />
+                        </linearGradient>
+                        <linearGradient id="gradSteam" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" stop-color="#f59e0b" />
+                            <stop offset="100%" stop-color="#fbbf24" />
+                        </linearGradient>
+                        <linearGradient id="gradFeedwater" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" stop-color="#2563eb" />
+                            <stop offset="100%" stop-color="#38bdf8" />
+                        </linearGradient>
+                        <linearGradient id="gradCoreGlow" x1="0%" y1="0%" x2="0%" y2="100%">
+                            <stop offset="0%" stop-color="#ef4444" stop-opacity="0.9" />
+                            <stop offset="50%" stop-color="#f59e0b" stop-opacity="0.8" />
+                            <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.4" />
+                        </linearGradient>
+                        
+                        <!-- Filter for glow -->
+                        <filter id="glowEffect" x="-20%" y="-20%" width="140%" height="140%">
+                            <feGaussianBlur stdDeviation="4" result="blur" />
+                            <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                        </filter>
+                    </defs>
+
+                    <!-- BACKGROUND BUILDINGS / CONTAINMENT OUTLINE -->
+                    <g id="containmentStructure" opacity="0.3">
+                        <!-- Containment Dome (격납건물) -->
+                        <path d="M 60 580 L 60 220 A 180 180 0 0 1 420 220 L 420 580 Z" fill="#1e293b" stroke="#334155" stroke-width="3" stroke-dasharray="6,4" />
+                        <text x="240" y="80" text-anchor="middle" fill="#64748b" font-size="12" font-weight="bold">원자로 격납건물 (Containment Building)</text>
+
+                        <!-- Turbine Building (터빈건물) -->
+                        <rect x="520" y="160" width="630" height="420" rx="10" fill="#0f172a" stroke="#1e293b" stroke-width="2" />
+                        <text x="835" y="185" text-anchor="middle" fill="#64748b" font-size="12" font-weight="bold">터빈 및 복수기 건물 (Turbine & Auxiliary Building)</text>
+                    </g>
+
+                    <!-- ========================================== -->
+                    <!-- PIPING PATHS (DRAWN UNDER COMPONENTS) -->
+                    <!-- ========================================== -->
+                    
+                    <!-- 1차 계통 PIPING -->
+                    <!-- Hot Leg (RPV -> SG) -->
+                    <path id="pipeHotLeg" d="M 230 360 L 320 360 L 320 340" fill="none" stroke="url(#gradHotLeg)" stroke-width="14" stroke-linecap="round" />
+                    <path id="pipeHotLegFlow" d="M 230 360 L 320 360 L 320 340" fill="none" stroke="#ffffff" stroke-width="3" class="pipe-flow" opacity="0.8" />
+
+                    <!-- Pressurizer Surge Line -->
+                    <path id="pipeSurge" d="M 270 360 L 270 240 L 220 240" fill="none" stroke="#ef4444" stroke-width="8" />
+
+                    <!-- SG U-Tubes (Inside SG) -->
+                    <path d="M 320 340 A 25 35 0 0 1 370 340 L 370 440 A 25 35 0 0 1 320 440 Z" fill="none" stroke="#f97316" stroke-width="8" opacity="0.6" />
+
+                    <!-- Cold Leg (SG -> RCP -> RPV) -->
+                    <path id="pipeColdLeg" d="M 370 440 L 370 480 L 270 480 L 270 430 L 190 430" fill="none" stroke="url(#gradColdLeg)" stroke-width="12" stroke-linecap="round" />
+                    <path id="pipeColdLegFlow" d="M 370 440 L 370 480 L 270 480 L 270 430 L 190 430" fill="none" stroke="#ffffff" stroke-width="3" class="pipe-flow-reverse" opacity="0.8" />
+
+                    <!-- DVI (Direct Vessel Injection) Emergency Line -->
+                    <path id="pipeDVI" d="M 100 520 L 100 390 L 140 390" fill="none" stroke="#ec4899" stroke-width="6" stroke-dasharray="4,4" />
+                    <path id="pipeDVIFlow" d="M 100 520 L 100 390 L 140 390" fill="none" stroke="#ffffff" stroke-width="2" class="pipe-flow" opacity="0" />
+
+                    <!-- 2차 계통 PIPING -->
+                    <!-- Main Steam Line (SG -> Turbine) -->
+                    <path id="pipeSteam" d="M 345 200 L 345 130 L 620 130 L 620 220" fill="none" stroke="url(#gradSteam)" stroke-width="12" stroke-linecap="round" />
+                    <path id="pipeSteamFlow" d="M 345 200 L 345 130 L 620 130 L 620 220" fill="none" stroke="#ffffff" stroke-width="3" class="pipe-flow-fast" opacity="0.9" />
+
+                    <!-- SBCS Bypass Line (Main Steam -> Condenser) -->
+                    <path id="pipeSbcs" d="M 580 130 L 580 430 L 750 430" fill="none" stroke="#f59e0b" stroke-width="6" stroke-dasharray="5,5" opacity="0.5" />
+
+                    <!-- Turbine Exhaust to Condenser -->
+                    <path d="M 680 290 L 680 380" fill="none" stroke="#fbbf24" stroke-width="20" opacity="0.4" />
+                    <path d="M 820 290 L 820 380" fill="none" stroke="#fbbf24" stroke-width="20" opacity="0.4" />
+
+                    <!-- 3차 계통 / 복수 및 재순환 PIPING -->
+                    <!-- Condenser to Feedwater Pump & Heaters to SG -->
+                    <path id="pipeFeedwater" d="M 850 480 L 980 480 L 980 540 L 480 540 L 480 320 L 390 320" fill="none" stroke="url(#gradFeedwater)" stroke-width="10" stroke-linecap="round" />
+                    <path id="pipeFeedwaterFlow" d="M 850 480 L 980 480 L 980 540 L 480 540 L 480 320 L 390 320" fill="none" stroke="#ffffff" stroke-width="2.5" class="pipe-flow" opacity="0.8" />
+
+                    <!-- Sea Water Cooling Line (Circulating Water to Condenser) -->
+                    <path d="M 620 500 L 880 500" fill="none" stroke="#0284c7" stroke-width="8" stroke-dasharray="6,4" />
+                    <path id="pipeSeaFlow" d="M 620 500 L 880 500" fill="none" stroke="#38bdf8" stroke-width="3" class="pipe-flow" />
+
+
+                    <!-- ========================================== -->
+                    <!-- MAJOR COMPONENTS DRAWING -->
+                    <!-- ========================================== -->
+
+                    <!-- 1. REACTOR PRESSURE VESSEL (RPV & CORE) -->
+                    <g id="componentRPV" transform="translate(130, 260)">
+                        <!-- Vessel Body -->
+                        <rect x="10" y="30" width="100" height="180" rx="35" fill="#1e293b" stroke="#0284c7" stroke-width="4" />
+                        <!-- Reactor Vessel Head (Cap) -->
+                        <path d="M 10 40 A 50 30 0 0 1 110 40 Z" fill="#334155" stroke="#0284c7" stroke-width="3" />
+                        
+                        <!-- Nuclear Core Fuel Assemblies -->
+                        <rect id="coreGlowRect" x="25" y="80" width="70" height="90" rx="6" fill="url(#gradCoreGlow)" filter="url(#glowEffect)" />
+                        <!-- Control Rod Guidance Lines -->
+                        <g stroke="#94a3b8" stroke-width="1.5" opacity="0.7">
+                            <line x1="35" y1="20" x2="35" y2="160" />
+                            <line x1="45" y1="20" x2="45" y2="160" />
+                            <line x1="55" y1="20" x2="55" y2="160" />
+                            <line x1="65" y1="20" x2="65" y2="160" />
+                            <line x1="75" y1="20" x2="75" y2="160" />
+                            <line x1="85" y1="20" x2="85" y2="160" />
+                        </g>
+
+                        <!-- Control Rod Drive Mechanism (CRDM) Control Bar -->
+                        <rect id="controlRodBar" x="30" y="10" width="60" height="20" rx="3" fill="#0284c7" stroke="#38bdf8" stroke-width="1.5" />
+                        
+                        <text x="60" y="-10" text-anchor="middle" fill="#38bdf8" font-size="12" font-weight="bold">원자로 용기 (RPV)</text>
+                        <text x="60" y="130" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="bold" shadow>핵연료 노심</text>
+                        <text id="svgTextCorePower" x="60" y="148" text-anchor="middle" fill="#fef08a" font-size="10" font-weight="bold">100 %</text>
+                    </g>
+
+                    <!-- 2. PRESSURIZER (가압기 - PZR) -->
+                    <g id="componentPZR" transform="translate(170, 140)">
+                        <rect x="10" y="20" width="40" height="100" rx="20" fill="#1e293b" stroke="#ef4444" stroke-width="3" />
+                        <!-- Water Level in PZR -->
+                        <rect id="pzrWaterLevel" x="12" y="60" width="36" height="55" fill="#0284c7" opacity="0.6" rx="5" />
+                        <!-- Heaters at bottom -->
+                        <line x1="18" y1="110" x2="18" y2="122" stroke="#f59e0b" stroke-width="3" />
+                        <line x1="25" y1="110" x2="25" y2="122" stroke="#f59e0b" stroke-width="3" />
+                        <line x1="32" y1="110" x2="32" y2="122" stroke="#f59e0b" stroke-width="3" />
+                        <!-- Spray Nozzle top -->
+                        <path d="M 25 22 L 20 30 L 30 30 Z" fill="#38bdf8" />
+                        
+                        <!-- POSRV Relief Valve Top -->
+                        <path id="posrvValve" d="M 25 20 L 25 5 M 20 5 L 30 5" stroke="#f59e0b" stroke-width="3" />
+
+                        <text x="30" y="-5" text-anchor="middle" fill="#ef4444" font-size="11" font-weight="bold">가압기 (PZR)</text>
+                        <text id="svgTextPzrPress" x="30" y="70" text-anchor="middle" fill="#ffffff" font-size="10" font-weight="bold">155 bar</text>
+                    </g>
+
+                    <!-- 3. STEAM GENERATOR (증기발생기 - SG) -->
+                    <g id="componentSG" transform="translate(300, 190)">
+                        <!-- Outer Shell -->
+                        <path d="M 10 50 A 35 35 0 0 1 80 50 L 80 200 A 25 25 0 0 1 30 200 L 10 200 Z" fill="#1e293b" stroke="#f59e0b" stroke-width="3" />
+                        <!-- Secondary Water Level -->
+                        <rect id="sgWaterLevel" x="12" y="110" width="66" height="85" fill="#0284c7" opacity="0.5" rx="4" />
+                        
+                        <text x="45" y="-10" text-anchor="middle" fill="#f59e0b" font-size="12" font-weight="bold">증기발생기 (SG)</text>
+                        <text x="45" y="130" text-anchor="middle" fill="#ffffff" font-size="10" font-weight="bold">2차측 수위</text>
+                        <text id="svgTextSgLevel" x="45" y="145" text-anchor="middle" fill="#38bdf8" font-size="11" font-weight="bold">50 %</text>
+                    </g>
+
+                    <!-- 4. REACTOR COOLANT PUMP (RCP) -->
+                    <g id="componentRCP" transform="translate(240, 455)">
+                        <circle cx="30" cy="25" r="22" fill="#1e293b" stroke="#06b6d4" stroke-width="3" />
+                        <!-- Impeller Fan Icon -->
+                        <g id="rcpImpeller" transform="rotate(0 30 25)">
+                            <path d="M 30 25 L 30 10 M 30 25 L 43 32 M 30 25 L 17 32" stroke="#06b6d4" stroke-width="4" stroke-linecap="round" />
+                        </g>
+                        <text x="30" y="60" text-anchor="middle" fill="#06b6d4" font-size="11" font-weight="bold">RCP (냉각재 펌프)</text>
+                    </g>
+
+                    <!-- 5. IRWST & DVI SYSTEM -->
+                    <g id="componentIRWST" transform="translate(40, 520)">
+                        <rect x="0" y="0" width="120" height="50" rx="6" fill="#1e293b" stroke="#ec4899" stroke-width="2" />
+                        <rect x="4" y="15" width="112" height="30" fill="#0284c7" opacity="0.6" rx="3" />
+                        <text x="60" y="-5" text-anchor="middle" fill="#ec4899" font-size="11" font-weight="bold">IRWST (건물내연료충전수조)</text>
+                        <text x="60" y="32" text-anchor="middle" fill="#ffffff" font-size="10" font-weight="bold">비상 비축 냉각수</text>
+                    </g>
+
+                    <!-- 6. MAIN STEAM ISOLATION VALVE (MSIV) -->
+                    <g id="componentMSIV" transform="translate(460, 105)">
+                        <polygon id="msivValveIcon" points="0,0 20,15 0,30 20,0 0,15 20,30" fill="#10b981" stroke="#ffffff" stroke-width="1.5" />
+                        <text x="10" y="-8" text-anchor="middle" fill="#10b981" font-size="10" font-weight="bold">MSIV</text>
+                    </g>
+
+                    <!-- 7. TURBINE & GENERATOR -->
+                    <g id="componentTurbine" transform="translate(610, 200)">
+                        <!-- High Pressure Turbine (HP) -->
+                        <polygon points="10,30 60,10 60,70 10,50" fill="#334155" stroke="#f59e0b" stroke-width="2.5" />
+                        <text x="35" y="44" text-anchor="middle" fill="#ffffff" font-size="10" font-weight="bold">HP</text>
+
+                        <!-- Shaft -->
+                        <line x1="60" y1="40" x2="220" y2="40" stroke="#94a3b8" stroke-width="6" />
+
+                        <!-- Low Pressure Turbines (LP1, LP2) -->
+                        <polygon points="80,10 130,30 130,50 80,70" fill="#334155" stroke="#f59e0b" stroke-width="2.5" />
+                        <text x="105" y="44" text-anchor="middle" fill="#ffffff" font-size="10" font-weight="bold">LP1</text>
+
+                        <polygon points="150,10 200,30 200,50 150,70" fill="#334155" stroke="#f59e0b" stroke-width="2.5" />
+                        <text x="175" y="44" text-anchor="middle" fill="#ffffff" font-size="10" font-weight="bold">LP2</text>
+
+                        <!-- Generator (발전기) -->
+                        <rect x="220" y="15" width="80" height="50" rx="8" fill="#1e293b" stroke="#f59e0b" stroke-width="3" />
+                        <circle cx="260" cy="40" r="16" fill="#f59e0b" opacity="0.2" />
+                        <text x="260" y="38" text-anchor="middle" fill="#fef08a" font-size="11" font-weight="bold">발전기</text>
+                        <text id="svgTextTurbineRpm" x="260" y="52" text-anchor="middle" fill="#ffffff" font-size="9" font-mono-num font-weight="bold">1,800 RPM</text>
+
+                        <text x="120" y="-10" text-anchor="middle" fill="#f59e0b" font-size="12" font-weight="bold">고압 / 저압 증기터빈 (Steam Turbine)</text>
+                    </g>
+
+                    <!-- 8. CONDENSER (복수기 - Condenser) & CIRCULATING WATER -->
+                    <g id="componentCondenser" transform="translate(650, 380)">
+                        <rect x="0" y="0" width="200" height="100" rx="10" fill="#1e293b" stroke="#38bdf8" stroke-width="3" />
+                        <!-- Internal Cooling Tubes Grid -->
+                        <g stroke="#0284c7" stroke-width="1.5" opacity="0.6">
+                            <line x1="20" y1="20" x2="180" y2="20" />
+                            <line x1="20" y1="40" x2="180" y2="40" />
+                            <line x1="20" y1="60" x2="180" y2="60" />
+                            <line x1="20" y1="80" x2="180" y2="80" />
+                        </g>
+                        <!-- Condensed Water Pool at Bottom -->
+                        <rect x="4" y="70" width="192" height="26" fill="#0284c7" opacity="0.7" rx="5" />
+
+                        <text x="100" y="35" text-anchor="middle" fill="#38bdf8" font-size="12" font-weight="bold">복수기 (Condenser)</text>
+                        <text id="svgTextCondVacuum" x="100" y="52" text-anchor="middle" fill="#e2e8f0" font-size="10" font-mono-num font-weight="bold">722 mmHg (진공)</text>
+                        <text x="100" y="87" text-anchor="middle" fill="#ffffff" font-size="9" font-weight="bold">응축수 (Hotwell)</text>
+                    </g>
+
+                    <!-- 9. CONDENSATE & MAIN FEEDWATER PUMPS & HEATERS -->
+                    <!-- Condensate Pump -->
+                    <g id="componentCondPump" transform="translate(830, 460)">
+                        <circle cx="20" cy="20" r="16" fill="#1e293b" stroke="#38bdf8" stroke-width="2.5" />
+                        <text x="20" y="48" text-anchor="middle" fill="#38bdf8" font-size="10" font-weight="bold">복수펌프</text>
+                    </g>
+
+                    <!-- Feedwater Heater (급수가열기) -->
+                    <g id="componentFwHeater" transform="translate(930, 510)">
+                        <rect x="0" y="0" width="50" height="50" rx="25" fill="#1e293b" stroke="#38bdf8" stroke-width="2" />
+                        <text x="25" y="28" text-anchor="middle" fill="#ffffff" font-size="9" font-weight="bold">급수가열</text>
+                        <text x="25" y="-6" text-anchor="middle" fill="#38bdf8" font-size="10" font-weight="bold">F/W Heater</text>
+                    </g>
+
+                    <!-- Main Feedwater Pump (주급수펌프) -->
+                    <g id="componentMfp" transform="translate(520, 515)">
+                        <circle cx="20" cy="20" r="18" fill="#1e293b" stroke="#2563eb" stroke-width="3" />
+                        <text x="20" y="50" text-anchor="middle" fill="#2563eb" font-size="10" font-weight="bold">주급수펌프 (MFP)</text>
+                    </g>
+
+                    <!-- Sea Water Intake Icon -->
+                    <g transform="translate(560, 480)">
+                        <path d="M 0 20 C 10 10, 20 30, 30 20 C 40 10, 50 30, 60 20" stroke="#0284c7" stroke-width="3" fill="none" />
+                        <text x="30" y="40" text-anchor="middle" fill="#0284c7" font-size="10" font-weight="bold">해수 유입 (Sea Water)</text>
+                    </g>
+
+                    <!-- FLOW ANNOTATIONS / LABELS -->
+                    <g font-size="10" font-weight="bold">
+                        <!-- Hot Leg Temp -->
+                        <rect x="240" y="325" width="65" height="18" rx="4" fill="#0f172a" stroke="#ef4444" opacity="0.9" />
+                        <text id="svgTextThot" x="272.5" y="338" text-anchor="middle" fill="#fca5a5" font-mono-num>Thot 324℃</text>
+
+                        <!-- Cold Leg Temp -->
+                        <rect x="280" y="490" width="65" height="18" rx="4" fill="#0f172a" stroke="#0284c7" opacity="0.9" />
+                        <text id="svgTextTcold" x="312.5" y="503" text-anchor="middle" fill="#7dd3fc" font-mono-num>Tcold 291℃</text>
+
+                        <!-- Steam Flow Temp/Press -->
+                        <rect x="420" y="100" width="80" height="18" rx="4" fill="#0f172a" stroke="#f59e0b" opacity="0.9" />
+                        <text id="svgTextSteamParam" x="460" y="113" text-anchor="middle" fill="#fef08a" font-mono-num">287℃ / 69bar</text>
+
+                        <!-- Feedwater Temp -->
+                        <rect x="420" y="555" width="80" height="18" rx="4" fill="#0f172a" stroke="#38bdf8" opacity="0.9" />
+                        <text id="svgTextFwParam" x="460" y="568" text-anchor="middle" fill="#bae6fd" font-mono-num">232℃ 급수유입</text>
+                    </g>
+                </svg>
+            </div>
+
+            <!-- TAB CONTENT 2: REAL-TIME TREND CHARTS -->
+            <div id="tabContentCharts" class="flex-1 bg-slate-950 p-4 hidden grid grid-cols-1 md:grid-cols-2 gap-4 overflow-y-auto">
+                <!-- Chart 1: Temperatures (Thot, Tcold, Tavg) -->
+                <div class="bg-slate-900 p-3 rounded-lg border border-slate-800 flex flex-col">
+                    <h3 class="text-xs font-bold text-slate-200 mb-2 flex items-center gap-1.5">
+                        <i class="fa-solid fa-temperature-half text-rose-400"></i> 1차계통 냉각재 온도 추이 (Primary Temperatures ℃)
+                    </h3>
+                    <div class="flex-1 relative min-h-[200px]">
+                        <canvas id="chartTemp"></canvas>
+                    </div>
+                </div>
+
+                <!-- Chart 2: Pressures (RCS vs SG Pressure) -->
+                <div class="bg-slate-900 p-3 rounded-lg border border-slate-800 flex flex-col">
+                    <h3 class="text-xs font-bold text-slate-200 mb-2 flex items-center gap-1.5">
+                        <i class="fa-solid fa-gauge-high text-cyan-400"></i> 1차계통 / 2차계통 압력 변화 (Pressures bar)
+                    </h3>
+                    <div class="flex-1 relative min-h-[200px]">
+                        <canvas id="chartPressure"></canvas>
+                    </div>
+                </div>
+
+                <!-- Chart 3: Power Output (MWth vs MWe) -->
+                <div class="bg-slate-900 p-3 rounded-lg border border-slate-800 flex flex-col">
+                    <h3 class="text-xs font-bold text-slate-200 mb-2 flex items-center gap-1.5">
+                        <i class="fa-solid fa-bolt text-amber-400"></i> 열출력 및 전기출력 추이 (Thermal & Electrical Power)
+                    </h3>
+                    <div class="flex-1 relative min-h-[200px]">
+                        <canvas id="chartPower"></canvas>
+                    </div>
+                </div>
+
+                <!-- Chart 4: Steam Generator Level & Feedwater Flow -->
+                <div class="bg-slate-900 p-3 rounded-lg border border-slate-800 flex flex-col">
+                    <h3 class="text-xs font-bold text-slate-200 mb-2 flex items-center gap-1.5">
+                        <i class="fa-solid fa-water text-blue-400"></i> 증기발생기 수위 및 급수유량 (SG Level % & Flow)
+                    </h3>
+                    <div class="flex-1 relative min-h-[200px]">
+                        <canvas id="chartSgLevel"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB CONTENT 3: EDUCATIONAL GUIDE / PRINCIPLES -->
+            <div id="tabContentGuide" class="flex-1 bg-slate-950 p-6 hidden overflow-y-auto max-w-5xl mx-auto space-y-6 text-slate-300">
+                <div class="border-b border-slate-800 pb-4">
+                    <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                        <i class="fa-solid fa-atom text-cyan-400"></i> APR1400 원자력발전소 계통 동작 원리 및 시뮬레이터 활용법
+                    </h2>
+                    <p class="text-xs text-slate-400 mt-1">한수원 인재개발원 교육생을 위한 계통별 핵심 구동 메커니즘 및 사고 대응 절차 모듈</p>
+                </div>
+
+                <div class="grid md:grid-cols-3 gap-4">
+                    <!-- 1차 계통 안내 -->
+                    <div class="bg-slate-900 p-4 rounded-lg border border-cyan-900/40 space-y-2">
+                        <h3 class="text-sm font-bold text-cyan-300 flex items-center gap-1.5">
+                            <span class="w-2.5 h-2.5 rounded-full bg-cyan-400"></span> 1차 계통 (Primary RCS)
+                        </h3>
+                        <p class="text-xs leading-relaxed text-slate-400">
+                            <strong>원자로용기(RPV), 가압기(PZR), 냉각재펌프(RCP)</strong>로 구성된 밀폐 순환 계통입니다. 핵분열 열로 냉각수를 약 312℃까지 가열하지만, 가압기가 약 155기압(bar)의 고압을 유지하므로 물이 끓지 않고 액체 상태로 열을 수송합니다.
+                        </p>
+                        <ul class="text-[11px] text-slate-400 list-disc list-inside space-y-1 pt-1">
+                            <li><strong class="text-slate-200">DVI (직접용기주입):</strong> 사고 시 비상 냉각수를 배관이 아닌 원자로 용기에 직접 주입.</li>
+                            <li><strong class="text-slate-200">POSRV:</strong> 파일럿 구동 안전방출밸브로 과압 방지.</li>
+                        </ul>
+                    </div>
+
+                    <!-- 2차 계통 안내 -->
+                    <div class="bg-slate-900 p-4 rounded-lg border border-amber-900/40 space-y-2">
+                        <h3 class="text-sm font-bold text-amber-300 flex items-center gap-1.5">
+                            <span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span> 2차 계통 (Secondary Loop)
+                        </h3>
+                        <p class="text-xs leading-relaxed text-slate-400">
+                            <strong>증기발생기(SG) 2차측, 주증기배관, 터빈, 발전기</strong>로 구성됩니다. 1차 계통의 열을 받아 물을 끓여 고압 증기(약 69bar, 287℃)를 생성하고, 이 증기가 터빈을 1,800 RPM으로 회전시켜 전기를 생산합니다.
+                        </p>
+                        <ul class="text-[11px] text-slate-400 list-disc list-inside space-y-1 pt-1">
+                            <li><strong class="text-slate-200">MSIV:</strong> 비상 시 주증기를 차단하는 격리 밸브.</li>
+                            <li><strong class="text-slate-200">SBCS:</strong> 터빈 트립 시 증기를 복수기로 바이패스하여 유압 완화.</li>
+                        </ul>
+                    </div>
+
+                    <!-- 3차 계통 안내 -->
+                    <div class="bg-slate-900 p-4 rounded-lg border border-blue-900/40 space-y-2">
+                        <h3 class="text-sm font-bold text-blue-300 flex items-center gap-1.5">
+                            <span class="w-2.5 h-2.5 rounded-full bg-blue-400"></span> 3차 및 복수/재순환 계통
+                        </h3>
+                        <p class="text-xs leading-relaxed text-slate-400">
+                            <strong>복수기(Condenser), 급수펌프(MFP), 급수가열기</strong>로 구성됩니다. 터빈을 통과한 증기를 해수로 냉각하여 다시 물(응축수)로 되돌린 뒤, 다시 증기발생기로 공급하는 순환 재활용 과정입니다.
+                        </p>
+                        <ul class="text-[11px] text-slate-400 list-disc list-inside space-y-1 pt-1">
+                            <li><strong class="text-slate-200">복수기 진공:</strong> 증기를 효율적으로 응축시켜 터빈 팽창 효율 증대.</li>
+                            <li><strong class="text-slate-200">해수 온도 영향:</strong> 여름철 해수 온도가 상승하면 복수기 진공도가 저하됨.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- 시뮬레이터 교육 시나리오 가이드 -->
+                <div class="bg-slate-900/80 p-5 rounded-lg border border-slate-800 space-y-3">
+                    <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                        <i class="fa-solid fa-list-check text-emerald-400"></i> 교육생 실습 과제 및 모의 실험 가이드
+                    </h3>
+                    <div class="grid md:grid-cols-2 gap-4 text-xs">
+                        <div class="bg-slate-950 p-3 rounded border border-slate-800">
+                            <h4 class="font-bold text-amber-300 mb-1">실습 1: 해수 온도 변화에 따른 발전 효율 영향 측정</h4>
+                            <p class="text-slate-400">좌측 제어창에서 [해수 유입 온도]를 10℃에서 30℃까지 조절해 보세요. 복수기 진공도와 출구 배기온도가 바뀌며 최종 전기출력($MW_e$) 및 열효율이 변화하는 동적 반응을 관찰할 수 있습니다.</p>
+                        </div>
+                        <div class="bg-slate-950 p-3 rounded border border-slate-800">
+                            <h4 class="font-bold text-rose-300 mb-1">실습 2: SBLOCA 사고발생 시 DVI 안전주입 동작 모사</h4>
+                            <p class="text-slate-400">상단 시나리오에서 [3. SBLOCA]를 선택하면 1차 계통 파손으로 압력과 수위가 급락합니다. 자동 작동하는 DVI(직접용기주입)계통이 IRWST 수조의 냉각수를 노심으로 직접 주입하여 노심 노출을 방지하는 과정을 확인하세요.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <script>
+        /* ===================================================================
+           APR1400 THERMODYNAMIC & KINETICS PHYSICS ENGINE
+           =================================================================== */
+
+        // Plant State Variable Object
+        const plant = {
+            // General Simulation Controls
+            isPaused: false,
+            simTime: 0,
+            
+            // 1st Loop (Primary RCS)
+            controlRodPos: 100,     // % (0: SCRAM inserted, 100: Fully Out)
+            corePowerPct: 100,      // % Thermal Power
+            corePowerMWth: 3983,    // MWth (APR1400 Nominal: 3983)
+            rcpCount: 4,            // Active RCPs (0 to 4)
+            rcpFlowRatio: 1.0,      // Primary Coolant Flow Ratio
+            
+            Thot: 324.2,            // Hot Leg Temperature (°C)
+            Tcold: 290.8,           // Cold Leg Temperature (°C)
+            Tavg: 307.5,            // RCS Average Temperature (°C)
+            rcsPressure: 155.1,     // RCS Pressure (bar) [Nominal ~155.1 bar / 2250 psia]
+            pzrLevel: 55.0,         // Pressurizer Water Level (%)
+            pzrHeaterOn: false,     // Manual/Auto Heater status
+            pzrSprayOn: false,      // Manual/Auto Spray status
+            posrvOpen: false,       // Safety Valve status
+
+            // Safety / Accident Systems
+            dviActive: false,       // Direct Vessel Injection Status
+            dviManualTrigger: false,// Manual Override DVI
+            sblocaActive: false,    // Small Break LOCA Accident Active
+            scrammed: false,        // SCRAM status
+
+            // 2nd Loop (Secondary Steam)
+            turbineDemandPct: 100,  // Demand %
+            turbinePowerMWe: 1400,  // Generator Output MWe (Nominal ~1400)
+            msivOpen: true,         // Main Steam Isolation Valve
+            sbcsPct: 0,             // Steam Bypass Control System (% open)
+            sgPressure: 69.0,       // Steam Generator Pressure (bar)
+            sgLevel: 50.0,          // SG Water Level (%)
+            turbineRpm: 1800,       // Turbine RPM
+
+            // 3rd Loop (Condenser & Feedwater Recirculation)
+            seaTemp: 18.0,          // Sea Cooling Water Inlet Temp (°C)
+            condVacuum: 722,        // Condenser Vacuum (mmHg) [Nominal ~722 mmHg]
+            condTemp: 38.5,         // Condenser Exhaust Temp (°C)
+            feedwaterRatePct: 100,  // Feedwater Flow Rate (%)
+            feedwaterTemp: 232.0,   // Feedwater Temp (°C)
+            efficiency: 35.15       // Net Efficiency (%)
+        };
+
+        // Historical Data Arrays for Chart.js
+        const maxChartDataPoints = 40;
+        const historyData = {
+            labels: [],
+            Thot: [],
+            Tcold: [],
+            rcsPress: [],
+            sgPress: [],
+            corePower: [],
+            elecPower: [],
+            sgLevel: []
+        };
+
+        // Chart Instances
+        let chartTempInstance = null;
+        let chartPressureInstance = null;
+        let chartPowerInstance = null;
+        let chartSgLevelInstance = null;
+
+        window.onload = function() {
+            initCharts();
+            // Start physics simulation loop at 10 Hz (100ms interval)
+            setInterval(simulationTick, 100);
+        };
+
+        /* ===================================================================
+           SIMULATION PHYSICS TICK (CALCULATIONS & DYNAMICS)
+           =================================================================== */
+        function simulationTick() {
+            if (plant.isPaused) return;
+
+            plant.simTime += 0.1;
+
+            // 1. Core Thermal Power Calculation (Reactivity Kinetics)
+            let targetPowerPct = plant.controlRodPos;
+            if (plant.scrammed) {
+                targetPowerPct = 1.0; // Decay Heat Level (~1-2%)
+            } else if (plant.sblocaActive) {
+                // Auto trip on SBLOCA low RCS pressure
+                if (plant.rcsPressure < 120) {
+                    triggerScram();
+                }
+            }
+
+            // Power lag transition
+            plant.corePowerPct += (targetPowerPct - plant.corePowerPct) * 0.08;
+            plant.corePowerMWth = (plant.corePowerPct / 100) * 3983;
+
+            // 2. RCS Flow & Temperature Calculations
+            plant.rcpFlowRatio = plant.rcpCount / 4.0;
+            const effectiveFlow = Math.max(0.1, plant.rcpFlowRatio);
+
+            // Temperature delta (Thot - Tcold) is proportional to Power / Flow
+            const tempDelta = (plant.corePowerPct / 100) * 33.4 / effectiveFlow;
+            
+            // Tcold dynamics based on SG heat removal
+            let targetTcold = 290.8;
+            if (!plant.msivOpen) {
+                // If MSIV is closed, SG traps heat -> Tcold rises
+                targetTcold += 25.0 * (plant.corePowerPct / 100);
+            }
+            plant.Tcold += (targetTcold - plant.Tcold) * 0.05;
+            plant.Thot = plant.Tcold + tempDelta;
+            plant.Tavg = (plant.Thot + plant.Tcold) / 2.0;
+
+            // 3. RCS Pressure Calculations (Pressurizer Dynamics)
+            // Temperature expansion/contraction changes pressure
+            let pressureChangeRate = (plant.Tavg - 307.5) * 0.15;
+
+            // Pressurizer Heaters / Spray Auto Control Logic
+            if (!plant.pzrHeaterOn && !plant.pzrSprayOn) {
+                if (plant.rcsPressure < 153.5) {
+                    pressureChangeRate += 0.4; // Auto Heaters ON
+                } else if (plant.rcsPressure > 157.0) {
+                    pressureChangeRate -= 0.5; // Auto Spray ON
+                }
+            } else {
+                if (plant.pzrHeaterOn) pressureChangeRate += 0.8;
+                if (plant.pzrSprayOn) pressureChangeRate -= 1.0;
+            }
+
+            // POSRV Valve Relief
+            if (plant.posrvOpen || plant.rcsPressure > 170) {
+                pressureChangeRate -= 3.0; // Rapid pressure relief
+            }
+
+            // SBLOCA Pressure Loss & Emergency Injection
+            if (plant.sblocaActive) {
+                pressureChangeRate -= 2.5; // Leakage rate
+            }
+
+            // DVI Emergency Injection Activation
+            if ((plant.rcsPressure < 110 || plant.dviManualTrigger) && (plant.sblocaActive || plant.dviManualTrigger)) {
+                plant.dviActive = true;
+                pressureChangeRate += 1.2; // ECCS water injection restores pressure & cools core
+                plant.Tcold -= 0.2; // Cold water injection
+            } else {
+                plant.dviActive = false;
+            }
+
+            plant.rcsPressure += pressureChangeRate * 0.1;
+            plant.rcsPressure = Math.max(10, Math.min(200, plant.rcsPressure));
+
+            // 4. Steam Generator & Secondary System Physics
+            let targetSgPress = 69.0;
+            if (!plant.msivOpen) {
+                targetSgPress = 82.0; // Bottled up SG
+            } else if (plant.turbineDemandPct < 100) {
+                targetSgPress = 69.0 + (100 - plant.turbineDemandPct) * 0.12;
+            }
+            plant.sgPressure += (targetSgPress - plant.sgPressure) * 0.05;
+
+            // SBCS (Steam Bypass Control System)
+            if (plant.sgPressure > 74.0) {
+                plant.sbcsPct = Math.min(100, (plant.sgPressure - 74.0) * 10);
+            } else {
+                plant.sbcsPct = 0;
+            }
+
+            // SG Water Level Balance (Feedwater In - Steam Out)
+            const steamOutflow = (plant.msivOpen ? (plant.turbineDemandPct + plant.sbcsPct) : 0) * (plant.corePowerPct / 100);
+            const feedwaterInflow = plant.feedwaterRatePct;
+            plant.sgLevel += (feedwaterInflow - steamOutflow) * 0.02;
+            plant.sgLevel = Math.max(0, Math.min(100, plant.sgLevel));
+
+            // 5. Turbine & Generator Electrical Output
+            let actualTurbineFlow = 0;
+            if (plant.msivOpen) {
+                actualTurbineFlow = (plant.turbineDemandPct / 100) * (plant.corePowerPct / 100);
+            }
+
+            plant.turbineRpm = actualTurbineFlow > 0.05 ? 1800 : Math.max(0, plant.turbineRpm - 10);
+
+            // 6. Condenser Vacuum & Thermal Efficiency
+            // Higher sea water temp reduces vacuum
+            const baseVacuum = 735 - (plant.seaTemp - 15) * 1.2;
+            const loadVacuumDrop = (actualTurbineFlow) * 8.0;
+            plant.condVacuum = Math.max(600, baseVacuum - loadVacuumDrop);
+            plant.condTemp = 32.0 + (plant.seaTemp * 0.4) + (actualTurbineFlow * 8.0);
+
+            // Net Efficiency calculation
+            const tempEfficiencyPenalty = (plant.seaTemp - 18.0) * 0.08;
+            plant.efficiency = 35.15 - tempEfficiencyPenalty;
+
+            plant.turbinePowerMWe = plant.corePowerMWth * (plant.efficiency / 100) * actualTurbineFlow;
+
+            // 7. Update UI Visuals & Annunciator Alarms
+            updateUI();
+            updateAnimations();
+            recordChartData();
+        }
+
+        /* ===================================================================
+           UI & SVG DYNAMICS UPDATER
+           =================================================================== */
+        function updateUI() {
+            // Stats Panel
+            document.getElementById('dispCorePower').innerText = Math.round(plant.corePowerMWth).toLocaleString();
+            document.getElementById('dispCorePowerPct').innerText = plant.corePowerPct.toFixed(1);
+            document.getElementById('dispElecPower').innerText = Math.round(plant.turbinePowerMWe).toLocaleString();
+            document.getElementById('dispRcsTemp').innerText = plant.Tavg.toFixed(1) + ' ℃';
+            document.getElementById('dispRcsPress').innerText = plant.rcsPressure.toFixed(1) + ' bar';
+            document.getElementById('dispSgPress').innerText = plant.sgPressure.toFixed(1) + ' bar';
+            document.getElementById('dispSgLevel').innerText = plant.sgLevel.toFixed(1) + ' %';
+            document.getElementById('dispCondVacuum').innerText = Math.round(plant.condVacuum) + ' mmHg';
+            document.getElementById('dispCondTemp').innerText = plant.condTemp.toFixed(1) + ' ℃';
+            document.getElementById('dispEfficiency').innerText = plant.efficiency.toFixed(2) + ' %';
+
+            // SVG Labels
+            document.getElementById('svgTextCorePower').textContent = plant.corePowerPct.toFixed(0) + ' %';
+            document.getElementById('svgTextThot').textContent = 'Thot ' + plant.Thot.toFixed(1) + '℃';
+            document.getElementById('svgTextTcold').textContent = 'Tcold ' + plant.Tcold.toFixed(1) + '℃';
+            document.getElementById('svgTextPzrPress').textContent = plant.rcsPressure.toFixed(1) + ' bar';
+            document.getElementById('svgTextSgLevel').textContent = plant.sgLevel.toFixed(1) + ' %';
+            document.getElementById('svgTextSteamParam').textContent = plant.sgPressure.toFixed(1) + 'bar / ' + plant.Tavg.toFixed(0) + '℃';
+            document.getElementById('svgTextTurbineRpm').textContent = Math.round(plant.turbineRpm) + ' RPM';
+            document.getElementById('svgTextCondVacuum').textContent = Math.round(plant.condVacuum) + ' mmHg (진공)';
+
+            // Control slider text readouts
+            document.getElementById('valControlRod').innerText = plant.controlRodPos + ' %';
+            document.getElementById('valRcpCount').innerText = plant.rcpCount + ' / 4 대';
+            document.getElementById('valTurbineDemand').innerText = plant.turbineDemandPct + ' % (' + Math.round(plant.turbineDemandPct * 14) + ' MW)';
+            document.getElementById('valSeaTemp').innerText = parseFloat(plant.seaTemp).toFixed(1) + ' ℃';
+            document.getElementById('valFeedwaterRate').innerText = plant.feedwaterRatePct + ' %';
+            document.getElementById('valSbcsStatus').innerText = plant.sbcsPct > 0 ? '작동 중 (' + plant.sbcsPct.toFixed(0) + '%)' : '대기 (0%)';
+
+            // Annunciator Alarms Matrix Check
+            checkAlarms();
+        }
+
+        function updateAnimations() {
+            // Core Glow Intensity
+            const coreGlow = document.getElementById('coreGlowRect');
+            if (coreGlow) {
+                coreGlow.style.opacity = Math.max(0.1, plant.corePowerPct / 100);
+            }
+
+            // RCP Impeller Rotation
+            const impeller = document.getElementById('rcpImpeller');
+            if (impeller && plant.rcpCount > 0) {
+                const currentRot = (plant.simTime * 500 * (plant.rcpCount / 4)) % 360;
+                impeller.setAttribute('transform', `rotate(${currentRot} 30 25)`);
+            }
+
+            // Pipe Flows Visibilities
+            const hotFlow = document.getElementById('pipeHotLegFlow');
+            const coldFlow = document.getElementById('pipeColdLegFlow');
+            const steamFlow = document.getElementById('pipeSteamFlow');
+            const dviFlow = document.getElementById('pipeDVIFlow');
+
+            if (hotFlow) hotFlow.style.opacity = plant.rcpCount > 0 ? "0.8" : "0.1";
+            if (coldFlow) coldFlow.style.opacity = plant.rcpCount > 0 ? "0.8" : "0.1";
+            if (steamFlow) steamFlow.style.opacity = (plant.msivOpen && plant.corePowerPct > 5) ? "0.9" : "0";
+            if (dviFlow) dviFlow.style.opacity = plant.dviActive ? "0.9" : "0";
+
+            // Water Level Heights in Components
+            const sgWater = document.getElementById('sgWaterLevel');
+            if (sgWater) {
+                const height = (plant.sgLevel / 100) * 140;
+                sgWater.setAttribute('y', 200 - height);
+                sgWater.setAttribute('height', height);
+            }
+        }
+
+        function checkAlarms() {
+            let activeCount = 0;
+
+            function setAlarm(id, active) {
+                const el = document.getElementById(id);
+                if (!el) return;
+                if (active) {
+                    el.classList.add('alarm-active');
+                    activeCount++;
+                } else {
+                    el.classList.remove('alarm-active');
+                }
+            }
+
+            setAlarm('alarmHighTemp', plant.Thot > 328.0);
+            setAlarm('alarmHighPress', plant.rcsPressure > 160.0);
+            setAlarm('alarmLowPress', plant.rcsPressure < 145.0);
+            setAlarm('alarmSgLowLevel', plant.sgLevel < 40.0);
+            setAlarm('alarmTurbineTrip', plant.turbineDemandPct === 0 && plant.corePowerPct > 20);
+            setAlarm('alarmDviActive', plant.dviActive);
+
+            document.getElementById('alarmCount').innerText = activeCount + " Active";
+        }
+
+        /* ===================================================================
+           INTERACTIVE CONTROLS HANDLERS
+           =================================================================== */
+        function updateControlRod(val) {
+            plant.controlRodPos = parseInt(val);
+            if (plant.controlRodPos > 0) plant.scrammed = false;
+        }
+
+        function setRcpCount(count) {
+            plant.rcpCount = count;
+            document.querySelectorAll('.rcp-btn').forEach((btn, idx) => {
+                if (idx + 1 === count) {
+                    btn.className = "rcp-btn bg-cyan-600 text-xs py-1 rounded text-white font-bold";
+                } else {
+                    btn.className = "rcp-btn bg-slate-800 hover:bg-slate-700 text-xs py-1 rounded text-slate-300 font-medium";
+                }
+            });
+        }
+
+        function togglePzrHeater() {
+            plant.pzrHeaterOn = !plant.pzrHeaterOn;
+            const btn = document.getElementById('btnPzrHeater');
+            if (plant.pzrHeaterOn) {
+                btn.className = "bg-amber-600 text-white py-1.5 rounded border border-amber-400 font-bold flex items-center justify-center gap-1 text-xs";
+            } else {
+                btn.className = "bg-slate-800 hover:bg-slate-700 text-slate-300 py-1.5 rounded border border-slate-700 flex items-center justify-center gap-1 text-xs";
+            }
+        }
+
+        function togglePzrSpray() {
+            plant.pzrSprayOn = !plant.pzrSprayOn;
+            const btn = document.getElementById('btnPzrSpray');
+            if (plant.pzrSprayOn) {
+                btn.className = "bg-blue-600 text-white py-1.5 rounded border border-blue-400 font-bold flex items-center justify-center gap-1 text-xs";
+            } else {
+                btn.className = "bg-slate-800 hover:bg-slate-700 text-slate-300 py-1.5 rounded border border-slate-700 flex items-center justify-center gap-1 text-xs";
+            }
+        }
+
+        function updateTurbineDemand(val) {
+            plant.turbineDemandPct = parseInt(val);
+        }
+
+        function toggleMsiv() {
+            plant.msivOpen = !plant.msivOpen;
+            const btn = document.getElementById('btnMsiv');
+            const icon = document.getElementById('msivValveIcon');
+            if (plant.msivOpen) {
+                btn.innerText = "OPEN (열림)";
+                btn.className = "bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3 py-1 rounded text-xs transition";
+                if (icon) icon.setAttribute('fill', '#10b981');
+            } else {
+                btn.innerText = "CLOSED (차단)";
+                btn.className = "bg-rose-600 hover:bg-rose-500 text-white font-bold px-3 py-1 rounded text-xs transition";
+                if (icon) icon.setAttribute('fill', '#ef4444');
+            }
+        }
+
+        function updateSeaTemp(val) {
+            plant.seaTemp = parseFloat(val);
+        }
+
+        function updateFeedwater(val) {
+            plant.feedwaterRatePct = parseInt(val);
+        }
+
+        function toggleDviManual() {
+            plant.dviManualTrigger = !plant.dviManualTrigger;
+            const btn = document.getElementById('btnDviManual');
+            if (plant.dviManualTrigger) {
+                btn.className = "bg-rose-600 text-white py-1.5 rounded border border-rose-400 font-bold text-center transition text-xs";
+            } else {
+                btn.className = "bg-slate-800 hover:bg-slate-700 text-rose-300 py-1.5 rounded border border-rose-800/60 font-semibold text-center transition text-xs";
+            }
+        }
+
+        function togglePosrvManual() {
+            plant.posrvOpen = !plant.posrvOpen;
+            const btn = document.getElementById('btnPosrvManual');
+            const valve = document.getElementById('posrvValve');
+            if (plant.posrvOpen) {
+                btn.className = "bg-amber-600 text-white py-1.5 rounded border border-amber-400 font-bold text-center transition text-xs";
+                if (valve) valve.setAttribute('stroke', '#ef4444');
+            } else {
+                btn.className = "bg-slate-800 hover:bg-slate-700 text-amber-300 py-1.5 rounded border border-amber-800/60 font-semibold text-center transition text-xs";
+                if (valve) valve.setAttribute('stroke', '#f59e0b');
+            }
+        }
+
+        function triggerScram() {
+            plant.scrammed = true;
+            plant.controlRodPos = 0;
+            document.getElementById('sliderControlRod').value = 0;
+            document.getElementById('valControlRod').innerText = '0 % (SCRAM)';
+            document.getElementById('mcrStateBadge').className = "font-bold text-rose-400 flex items-center gap-1.5";
+            document.getElementById('mcrStateBadge').innerHTML = '<span class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span> 원자로 비상정지 (SCRAM)';
+        }
+
+        function togglePause() {
+            plant.isPaused = !plant.isPaused;
+            const btn = document.getElementById('btnPause');
+            if (plant.isPaused) {
+                btn.innerHTML = '<i class="fa-solid fa-play"></i> <span>재개</span>';
+                btn.className = "bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-1.5 rounded-md font-semibold transition flex items-center gap-1";
+            } else {
+                btn.innerHTML = '<i class="fa-solid fa-pause"></i> <span>일시정지</span>';
+                btn.className = "bg-amber-600/80 hover:bg-amber-500 text-white text-xs px-3 py-1.5 rounded-md font-semibold transition flex items-center gap-1";
+            }
+        }
+
+        function resetSimulation() {
+            plant.isPaused = false;
+            plant.simTime = 0;
+            plant.controlRodPos = 100;
+            plant.corePowerPct = 100;
+            plant.rcpCount = 4;
+            plant.Thot = 324.2;
+            plant.Tcold = 290.8;
+            plant.Tavg = 307.5;
+            plant.rcsPressure = 155.1;
+            plant.pzrHeaterOn = false;
+            plant.pzrSprayOn = false;
+            plant.posrvOpen = false;
+            plant.dviManualTrigger = false;
+            plant.sblocaActive = false;
+            plant.scrammed = false;
+            plant.turbineDemandPct = 100;
+            plant.msivOpen = true;
+            plant.sgPressure = 69.0;
+            plant.sgLevel = 50.0;
+            plant.seaTemp = 18.0;
+            plant.feedwaterRatePct = 100;
+
+            document.getElementById('sliderControlRod').value = 100;
+            document.getElementById('sliderTurbineDemand').value = 100;
+            document.getElementById('sliderSeaTemp').value = 18;
+            document.getElementById('sliderFeedwater').value = 100;
+            setRcpCount(4);
+
+            document.getElementById('mcrStateBadge').className = "font-bold text-emerald-400 flex items-center gap-1.5";
+            document.getElementById('mcrStateBadge').innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 정상 출력 운전 (100% Full Power)';
+
+            document.getElementById('scenarioSelect').value = 'normal';
+        }
+
+        function loadScenario(type) {
+            resetSimulation();
+            const badge = document.getElementById('mcrStateBadge');
+
+            if (type === 'normal') {
+                badge.className = "font-bold text-emerald-400 flex items-center gap-1.5";
+                badge.innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 정상 정격 출력 운전 (100%)';
+            } else if (type === 'load_follow') {
+                plant.turbineDemandPct = 50;
+                plant.controlRodPos = 55;
+                document.getElementById('sliderControlRod').value = 55;
+                document.getElementById('sliderTurbineDemand').value = 50;
+                badge.className = "font-bold text-amber-400 flex items-center gap-1.5";
+                badge.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> 부하 추종 모드 (50% 감발)';
+            } else if (type === 'sbloca') {
+                plant.sblocaActive = true;
+                badge.className = "font-bold text-rose-400 flex items-center gap-1.5";
+                badge.innerHTML = '<span class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span> 비상: 소형 냉각재 상실 사고 (SBLOCA)';
+            } else if (type === 'turbine_trip') {
+                plant.turbineDemandPct = 0;
+                document.getElementById('sliderTurbineDemand').value = 0;
+                badge.className = "font-bold text-amber-400 flex items-center gap-1.5";
+                badge.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span> 과도현상: 터빈 트립 발생 (SBCS 바이패스)';
+            } else if (type === 'rcp_trip') {
+                setRcpCount(3);
+                badge.className = "font-bold text-amber-400 flex items-center gap-1.5";
+                badge.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> 장비고장: RCP 1대 트립 (3/4대 운전)';
+            }
+        }
+
+        /* ===================================================================
+           CHART.JS REAL-TIME GRAPHING & TAB SWITCHING
+           =================================================================== */
+        function switchMainTab(tab) {
+            document.getElementById('tabContentDiagram').classList.add('hidden');
+            document.getElementById('tabContentCharts').classList.add('hidden');
+            document.getElementById('tabContentGuide').classList.add('hidden');
+
+            document.getElementById('tabBtnDiagram').className = "px-3 py-1 rounded text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 flex items-center gap-1.5 transition";
+            document.getElementById('tabBtnCharts').className = "px-3 py-1 rounded text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 flex items-center gap-1.5 transition";
+            document.getElementById('tabBtnGuide').className = "px-3 py-1 rounded text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 flex items-center gap-1.5 transition";
+
+            if (tab === 'diagram') {
+                document.getElementById('tabContentDiagram').classList.remove('hidden');
+                document.getElementById('tabBtnDiagram').className = "px-3 py-1 rounded text-xs font-bold bg-cyan-600 text-white flex items-center gap-1.5 transition";
+            } else if (tab === 'charts') {
+                document.getElementById('tabContentCharts').classList.remove('hidden');
+                document.getElementById('tabBtnCharts').className = "px-3 py-1 rounded text-xs font-bold bg-cyan-600 text-white flex items-center gap-1.5 transition";
+            } else if (tab === 'guide') {
+                document.getElementById('tabContentGuide').classList.remove('hidden');
+                document.getElementById('tabBtnGuide').className = "px-3 py-1 rounded text-xs font-bold bg-cyan-600 text-white flex items-center gap-1.5 transition";
+            }
+        }
+
+        function initCharts() {
+            const chartOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                scales: {
+                    x: { ticks: { color: '#64748b', font: { size: 9 } }, grid: { color: '#1e293b' } },
+                    y: { ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { color: '#1e293b' } }
+                },
+                plugins: { legend: { labels: { color: '#cbd5e1', font: { size: 10 } } } }
+            };
+
+            // Temperature Chart
+            const ctxTemp = document.getElementById('chartTemp').getContext('2d');
+            chartTempInstance = new Chart(ctxTemp, {
+                type: 'line',
+                data: {
+                    labels: historyData.labels,
+                    datasets: [
+                        { label: 'Thot (°C)', data: historyData.Thot, borderColor: '#ef4444', borderWidth: 2, pointRadius: 0 },
+                        { label: 'Tcold (°C)', data: historyData.Tcold, borderColor: '#38bdf8', borderWidth: 2, pointRadius: 0 }
+                    ]
+                },
+                options: chartOptions
+            });
+
+            // Pressure Chart
+            const ctxPress = document.getElementById('chartPressure').getContext('2d');
+            chartPressureInstance = new Chart(ctxPress, {
+                type: 'line',
+                data: {
+                    labels: historyData.labels,
+                    datasets: [
+                        { label: 'RCS 압력 (bar)', data: historyData.rcsPress, borderColor: '#06b6d4', borderWidth: 2, pointRadius: 0 },
+                        { label: 'SG 압력 (bar)', data: historyData.sgPress, borderColor: '#f59e0b', borderWidth: 2, pointRadius: 0 }
+                    ]
+                },
+                options: chartOptions
+            });
+
+            // Power Chart
+            const ctxPower = document.getElementById('chartPower').getContext('2d');
+            chartPowerInstance = new Chart(ctxPower, {
+                type: 'line',
+                data: {
+                    labels: historyData.labels,
+                    datasets: [
+                        { label: '원자로 열출력 (MWth)', data: historyData.corePower, borderColor: '#f43f5e', borderWidth: 2, pointRadius: 0 },
+                        { label: '전기출력 (MWe)', data: historyData.elecPower, borderColor: '#eab308', borderWidth: 2, pointRadius: 0 }
+                    ]
+                },
+                options: chartOptions
+            });
+
+            // SG Level Chart
+            const ctxSg = document.getElementById('chartSgLevel').getContext('2d');
+            chartSgLevelInstance = new Chart(ctxSg, {
+                type: 'line',
+                data: {
+                    labels: historyData.labels,
+                    datasets: [
+                        { label: '증기발생기 수위 (%)', data: historyData.sgLevel, borderColor: '#10b981', borderWidth: 2, pointRadius: 0 }
+                    ]
+                },
+                options: chartOptions
+            });
+        }
+
+        function recordChartData() {
+            const timeLabel = Math.round(plant.simTime) + 's';
+            historyData.labels.push(timeLabel);
+            historyData.Thot.push(plant.Thot.toFixed(1));
+            historyData.Tcold.push(plant.Tcold.toFixed(1));
+            historyData.rcsPress.push(plant.rcsPressure.toFixed(1));
+            historyData.sgPress.push(plant.sgPressure.toFixed(1));
+            historyData.corePower.push(Math.round(plant.corePowerMWth));
+            historyData.elecPower.push(Math.round(plant.turbinePowerMWe));
+            historyData.sgLevel.push(plant.sgLevel.toFixed(1));
+
+            if (historyData.labels.length > maxChartDataPoints) {
+                historyData.labels.shift();
+                historyData.Thot.shift();
+                historyData.Tcold.shift();
+                historyData.rcsPress.shift();
+                historyData.sgPress.shift();
+                historyData.corePower.shift();
+                historyData.elecPower.shift();
+                historyData.sgLevel.shift();
+            }
+
+            if (chartTempInstance) chartTempInstance.update();
+            if (chartPressureInstance) chartPressureInstance.update();
+            if (chartPowerInstance) chartPowerInstance.update();
+            if (chartSgLevelInstance) chartSgLevelInstance.update();
+        }
+    </script>
+</body>
+</html>
